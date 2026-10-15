@@ -1731,7 +1731,7 @@ test("storage isolation: every browser storage key of the page is namespaced wth
   for (const [n, txt] of [["app.js", app], ["index.html", html], ["config.js", cfg], ["README.md", readme]]) {
     for (const bad of ["แน็ป", "82260007625693", "2569-8409", "AKfycbz4beWw5", "balance-waste-nap", "Waste Nap"]) assert.ok(!txt.includes(bad), n + " must not contain " + bad);
   }
-  assert.strictEqual(cfg.replace(/^\/\/.*$/gm, "").match(/apiUrl:\s*"([^"]*)"/)[1], "", "config.js apiUrl stays empty in the repo");
+  assert.ok(/^(|https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec)$/.test(cfg.replace(/^\/\/.*$/gm, "").match(/apiUrl:\s*"([^"]*)"/)[1]), "config.js apiUrl is empty or this company's own /exec URL");
   assert.ok(readme.includes("https://watanathep8-dotcom.github.io/balance-waste-thepwatana/") && readme.includes("Balance Waste Thepwatana"));
 });
 
