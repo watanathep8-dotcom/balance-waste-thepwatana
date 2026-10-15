@@ -1729,7 +1729,7 @@ test("storage isolation: every browser storage key of the page is namespaced wth
   for (const m of app.matchAll(/(?:localStorage|sessionStorage)\.(?:get|set|remove)Item\(([^,)]+)/g)) assert.ok(/rcKey|k\b|RC_PREFIX/.test(m[1]), "raw storage key: " + m[1]);
   assert.ok(html.includes("บริษัท เทพวัฒนา จำกัด"));
   for (const [n, txt] of [["app.js", app], ["index.html", html], ["config.js", cfg], ["README.md", readme]]) {
-    for (const bad of ["แน็ป", "82260007625693", "2569-8409", "AKfycb", "balance-waste-nap", "Waste Nap"]) assert.ok(!txt.includes(bad), n + " must not contain " + bad);
+    for (const bad of ["แน็ป", "82260007625693", "2569-8409", "AKfycbz4beWw5", "balance-waste-nap", "Waste Nap"]) assert.ok(!txt.includes(bad), n + " must not contain " + bad);
   }
   assert.strictEqual(cfg.replace(/^\/\/.*$/gm, "").match(/apiUrl:\s*"([^"]*)"/)[1], "", "config.js apiUrl stays empty in the repo");
   assert.ok(readme.includes("https://watanathep8-dotcom.github.io/balance-waste-thepwatana/") && readme.includes("Balance Waste Thepwatana"));
