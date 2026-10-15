@@ -5,8 +5,8 @@
  *
  * Setup (once): run setupSystem() from the Apps Script editor. It creates the
  * "Balance Waste Database" spreadsheet (one sheet per table, header row on
- * top; NO waste types or receivers are seeded - the admin adds them in the
- * settings page) and stores the spreadsheet ID in Script Properties
+ * top; a NEW database is seeded with the 40 permit lines and 8 receivers of
+ * สก.2 2569-12560, see seedThepwatanaPermit) and stores the spreadsheet ID in Script Properties
  * (WASTE_SPREADSHEET_ID). Apps Script project name: "Balance Waste Thepwatana".
  * Then deploy as a web app (Execute as: me, Who has access: Anyone).
  *
@@ -104,9 +104,9 @@ var TZ_OFFSET_MS = 7 * 60 * 60 * 1000;
 // the factory-registration / permit chips only when they are filled in.
 var COMPANY = {
   name: "บริษัท เทพวัฒนา จำกัด",
-  factoryReg: "",   // optional: ทะเบียนโรงงาน
-  permitNo: "",     // optional: เลขที่หนังสืออนุญาต (สก.2)
-  permitYear: ""    // optional: ปีของหนังสืออนุญาต (e.g. 2569)
+  factoryReg: "820200300125423",   // ทะเบียนโรงงานเลขที่
+  permitNo: "2569-12560",     // เลขที่หนังสืออนุญาต (สก.2)
+  permitYear: 2569    // ปีของหนังสืออนุญาต
 };
 
 var CONTAINERS = { drum200: "ถัง 200 ลิตร", ibc: "IBC", bigbag: "Bigbag" };
@@ -159,7 +159,67 @@ var SCHEMA = {
 var TABLE_ORDER = ["waste_types", "receivers", "movements", "audit_logs"];
 var AUTO_CREATE_TABLES = ["receivers"];
 
-// No seed data: waste types and receivers are added by the admin (settings page).
+/* Permit seed: the 40 lines of the สก.2 letter 2569-12560 (total 1,101.55 t), from the
+ * workbook Waste_Summary_Report_Thepwatana_2569.xlsx, sheet "รายการที่ได้รับอนุญาตทั้งหมด".
+ * Each line is its own waste type (a code can repeat with another receiver / management
+ * code). setupSystem() seeds a NEW database with it; for an existing EMPTY database run
+ * seedThepwatanaPermit() once. Admin can still edit everything in the settings page. */
+var SEED_ON_SETUP = true;
+var PERMIT_LINES = [
+  // [code, name, permit tons, management code, receiver registration, receiver, icon, colour]
+  ["150111","กระป๋องสเปรย์",1,"073","20190300225401","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-spray-can","#D92626"],
+  ["160215","หลอดไฟ",1,"073","20190300225401","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-lightbulb","#20B64C"],
+  ["080409","กากกาว",20,"042","10190000825494","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-fill-drip","#8E26D9"],
+  ["150202","วัสดุปนเปื้อน",60,"042","10190000825494","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-biohazard","#B6A320"],
+  ["160698","ถ่านไฟฉาย",0.05,"073","20190300225401","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-battery-half","#26BBD9"],
+  ["191204","เศษสติ๊กเกอร์",40,"046","10190000825494","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-note-sticky","#B62071"],
+  ["150203","อุปกรณ์ PPE",30,"071","20190300225401","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-user-shield","#53D926"],
+  ["160213","อุปกรณ์อิเล็กทรอนิกส์",5,"073","20190300225401","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-microchip","#2720B6"],
+  ["140603","โซลเว้นท์ใช้แล้ว",20,"042","10190000825494","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-flask","#D96226"],
+  ["150110","ตลับหมึก ภาชนะปนเปื้อน",40,"073","20190300225401","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-print","#20B67E"],
+  ["160601","แบตเตอรี่",5,"021","10190000825494","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-car-battery","#CA26D9"],
+  ["150110","บรรจุภัณฑ์ปนเปื้อน",400,"039","10740101225521","บจก. อารยาค้าถัง","fa-box-archive","#97B620"],
+  ["150102","บรรจุภัณฑ์พลาสติก พลาสติก",10,"046","10190000825494","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-bottle-water","#267FD9"],
+  ["150102","บรรจุภัณฑ์พลาสติก พลาสติก",30,"011","10110020125675","บจก. มั่นคงยั่งยืน รีไซเคิล","fa-recycle","#B6203F"],
+  ["150101","กระดาษ",15,"011","10110020125675","บจก. มั่นคงยั่งยืน รีไซเคิล","fa-newspaper","#26D935"],
+  ["130208","น้ำมันใช้แล้ว",2,"075","82020000125442","บมจ. อัคคีปราการ","fa-oil-can","#5920B6"],
+  ["070404","Xylene",5,"075","82020000125442","บมจ. อัคคีปราการ","fa-vial","#D99E26"],
+  ["070411","ตะกอนน้ำเสีย",30,"075","82020000125442","บมจ. อัคคีปราการ","fa-water","#20B6B0"],
+  ["070413","วัตถุดิบเสื่อมสภาพ ฝุ่นจากกระบวนการผลิต",20,"075","82020000125442","บมจ. อัคคีปราการ","fa-industry","#D926AC"],
+  ["080409","กากกาว",10,"075","82020000125442","บมจ. อัคคีปราการ","fa-droplet","#64B620"],
+  ["150202","วัสดุปนเปื้อน ทรายดูดซับ",30,"075","82020000125442","บมจ. อัคคีปราการ","fa-hill-rockslide","#2644D9"],
+  ["070401","Waste water contaminated with chemical Cleaning Process สารเคมีเสื่อมสภาพ น้ำเสียจากการล้าง",20,"075","82020000125442","บมจ. อัคคีปราการ","fa-flask-vial","#B63320"],
+  ["160506","Lab waste",20,"075","82020000125442","บมจ. อัคคีปราการ","fa-pump-soap","#26D971"],
+  ["160213","อุปกรณ์อิเล็กทรอนิกส์",1,"075","82020000125442","บมจ. อัคคีปราการ","fa-microscope","#8B20B6"],
+  ["150110","ภาชนะปนเปื้อน",30,"075","82020000125442","บมจ. อัคคีปราการ","fa-computer","#D8D926"],
+  ["150111","กระป๋องสเปรย์",1,"075","82020000125442","บมจ. อัคคีปราการ","fa-box","#208AB6"],
+  ["160305","Expire chemical Liquid Expire chemical Solid",40,"075","82020000125442","บมจ. อัคคีปราการ","fa-spray-can-sparkles","#D92670"],
+  ["150104","แผ่นฟอยล์",5,"071","20190300225401","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-skull-crossbones","#32B620"],
+  ["150202","วัสดุปนเปื้อน ทรายดูดซับ",30,"042","72070000125407","บมจ. บริหารและพัฒนาเพื่อการอนุรักษ์สิ่งแวดล้อม","fa-layer-group","#4526D9"],
+  ["190814","ตะกอนน้ำเสีย",20,"071","10700001425472","บมจ. บริหารและพัฒนาเพื่อการอนุรักษ์สิ่งแวดล้อม","fa-battery-full","#B66520"],
+  ["160709","Waste water contaminated with chemical",20,"065","10103300225380","บมจ. บริหารและพัฒนาเพื่อการอนุรักษ์สิ่งแวดล้อม","fa-burst","#26D9AD"],
+  ["191201","ของเสียทั่วไปจากการผลิต",30,"046","72070000125407","บมจ. บริหารและพัฒนาเพื่อการอนุรักษ์สิ่งแวดล้อม","fa-tint","#B620AF"],
+  ["1601001","น้ำล้างเครื่องจักร น้ำเสียผ่านระบบบำบัดแล้ว",50,"042","10190000825494","บมจ. เบตเตอร์ เวิลด์ กรีน","fa-hand-sparkles","#9CD926"],
+  ["1601001","น้ำล้างเครื่องจักร น้ำเสียผ่านระบบบำบัดแล้ว",20,"065","10103300225380","บมจ. บริหารและพัฒนาเพื่อการอนุรักษ์สิ่งแวดล้อม","fa-gas-pump","#2058B6"],
+  ["140603","ตัวทำละลาย",5,"051","10240002925477","บจก. สุขเจริญทรัพย์ วังเย็น","fa-faucet-drip","#D92634"],
+  ["130208","น้ำมันเครื่องยนต์ น้ำมันเกียร์ น้ำมันหล่อลื่นที่ใช้แล้ว",5,"042","10240002925477","บจก. สุขเจริญทรัพย์ วังเย็น","fa-vials","#20B640"],
+  ["191212","ของเสียทั่วไปจากกระบวนการผลิต",10,"011","10110100225577","บจก. กรีนเซฟรีไซเคิ้ล","fa-trash-can","#8026D9"],
+  ["160215","Fluorescent Lamp",0.5,"049","10240004525614","บจก. ซี.อี.เอ คลีนโปรดักส์","fa-lightbulb","#B69820"],
+  ["150110","Contaminated Container",10,"039","10110102325581","บจก. กรีนเซฟรีไซเคิ้ล","fa-box-open","#26C9D9"],
+  ["150202","Contaminated Material Absorbent",10,"042","10110102325581","บจก. กรีนเซฟรีไซเคิ้ล","fa-radiation","#B6207D"]
+];
+// [receiver name, primary registration] - a receiver that has more registrations keeps the first
+// one here (the registration of each line stays on its waste type).
+var PERMIT_RECEIVERS = [
+  ["บจก. อารยาค้าถัง", "10740101225521"],
+  ["บมจ. เบตเตอร์ เวิลด์ กรีน", "10190000825494"],
+  ["บมจ. อัคคีปราการ", "82020000125442"],
+  ["บมจ. บริหารและพัฒนาเพื่อการอนุรักษ์สิ่งแวดล้อม", "72070000125407"],
+  ["บจก. มั่นคงยั่งยืน รีไซเคิล", "10110020125675"],
+  ["บจก. กรีนเซฟรีไซเคิ้ล", "10110102325581"],
+  ["บจก. สุขเจริญทรัพย์ วังเย็น", "10240002925477"],
+  ["บจก. ซี.อี.เอ คลีนโปรดักส์", "10240004525614"]
+];
 
 var READ_ACTIONS = ["bootstrap", "dashboard", "history", "export", "logs", "logs_export", "batch"];
 // "batch": several reads in one request; writes accept the same optional
@@ -1811,10 +1871,65 @@ function fromCell_(type, v) {
 
 /* ===================== setup ===================== */
 
+// Inserts the permit receivers + waste types (inside a request, buffered; the caller flushes).
+// Does nothing when the waste_types sheet already has rows. Never touches movements.
+function seedPermit_() {
+  if (table_("waste_types").rows.length) return { types: 0, receivers: 0, permit_tons: 0 };
+  var at = nowParts_().datetime;
+  var haveRcv = {};
+  table_("receivers").rows.forEach(function (r) { haveRcv[recvKey_(r.name)] = true; });
+  var maxRs = table_("receivers").rows.reduce(function (m, r) { return Math.max(m, r.sort); }, 0);
+  var rcv = 0;
+  PERMIT_RECEIVERS.forEach(function (r) {
+    if (haveRcv[recvKey_(r[0])]) return;
+    insert_("receivers", { name: r[0], reg: r[1], mgmt_code: "", active: 1, sort: ++maxRs, updated_at: at, updated_by: REQ_.actor });
+    rcv++;
+  });
+  var cents = 0;
+  PERMIT_LINES.forEach(function (t, i) {
+    insert_("waste_types", {
+      code: t[0], name: t[1], permit_tons: t[2], mgmt_code: t[3], receiver_reg: t[4], receiver: t[5],
+      icon: t[6], color: t[7], active: 1, sort: i + 1, updated_at: at, updated_by: REQ_.actor
+    });
+    cents += Math.round(t[2] * 100);
+  });
+  return { types: PERMIT_LINES.length, receivers: rcv, permit_tons: cents / 100 };
+}
+
+/**
+ * Run ONCE from the Apps Script editor on an existing EMPTY database: adds the 40
+ * waste types and 8 receivers of สก.2 2569-12560 (1,101.55 t). Refuses (and changes
+ * nothing) when the waste_types sheet already has rows; never touches movements.
+ */
+function seedThepwatanaPermit() {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    resetRequest_("seedThepwatanaPermit");
+    REQ_.actor = "seedThepwatanaPermit";
+    var existing = table_("waste_types").rows.length;
+    if (existing) {
+      var refused = { seeded: false, existingTypes: existing, message: "ไม่ได้เพิ่มข้อมูล: ชีต waste_types มีข้อมูลอยู่แล้ว " + existing + " แถว (รันได้เฉพาะฐานข้อมูลที่ยังว่าง)" };
+      console.log(refused.message);
+      REQ_ = null;
+      return refused;
+    }
+    var r = seedPermit_();
+    flush_();
+    REQ_ = null;
+    var result = { seeded: true, types: r.types, receivers: r.receivers, permit_tons: r.permit_tons,
+      message: "เพิ่มข้อมูลสำเร็จ: " + r.types + " ประเภท, " + r.receivers + " ผู้รับดำเนินการ, อนุญาตรวม " + r.permit_tons + " ตัน" };
+    console.log(result.message);
+    return result;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /**
  * One-time setup. Run from the Apps Script editor and approve permissions.
  * If WASTE_SPREADSHEET_ID is already set, the existing spreadsheet is reused
- * (missing sheets/headers are added; no waste types are seeded) instead of creating another.
+ * (missing sheets/headers are added; existing data is never seeded or changed) instead of creating another.
  */
 function setupSystem() {
   var properties = PropertiesService.getScriptProperties();
@@ -1848,8 +1963,8 @@ function setupSystem() {
   resetRequest_("setupSystem");
   REQ_.ss = ss;
   TABLE_ORDER.forEach(function (name) { table_(name); REQ_.dirty[name] = true; });
-  var seeded = 0; // empty database by design
   REQ_.actor = "setupSystem";
+  var seeded = created && SEED_ON_SETUP ? seedPermit_().types : 0;
   ensureReceivers_();
   flush_();
   REQ_ = null;

@@ -1,5 +1,5 @@
 // Local-only preview of docs/ against the in-memory GAS mock (no Google, no network).
-//   node test/dev-server.js [port] [--demo]
+//   node test/dev-server.js [port] [--demo | --seed]
 // Without --demo the database is EMPTY (like a fresh setupSystem): add types in the settings page (admin: dev-reset).
 // --demo first creates 13 synthetic sample types (fake receivers), then fills the in-memory mock with generated SAMPLE movements (for screenshots
 // only; nothing is stored anywhere and the data is not real).
@@ -21,6 +21,7 @@ ctx.setupSystem();
 
 const args = process.argv.slice(2);
 const port = Number(args.find(a => /^\d+$/.test(a))) || 8777;
+if (args.includes("--seed")) ctx.seedThepwatanaPermit(); // the real permit data (40 types / 8 receivers)
 if (args.includes("--demo")) seedDemo();
 
 function seedDemo() {

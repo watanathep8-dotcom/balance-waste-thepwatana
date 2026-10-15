@@ -223,6 +223,7 @@ function loadCode(gas) {
   const ctx = vm.createContext(Object.assign({}, gas));
   const src = fs.readFileSync(path.join(ROOT, "apps-script", "Code.gs"), "utf8");
   vm.runInContext(src, ctx, { filename: "Code.gs" });
+  ctx.SEED_ON_SETUP = false; // most tests start from an empty install; the seed tests switch it on
   return ctx;
 }
 
@@ -363,12 +364,12 @@ test("setupSystem creates an EMPTY spreadsheet: 4 sheets with headers, no waste 
   TV = login(VPW); TS = login(SPW); TA = login(RPW);
 });
 
-test("company identity: Thepwatana name; factory registration / permit number / year are optional and empty; no original-company data in Code.gs", () => {
+test("company identity: Thepwatana name, factory registration 820200300125423, สก.2 2569-12560, year 2569; no original-company data in Code.gs", () => {
   const b = boot();
   assert.strictEqual(b.company.name, "บริษัท เทพวัฒนา จำกัด");
-  assert.strictEqual(b.company.factoryReg, "");
-  assert.strictEqual(b.company.permitNo, "");
-  assert.strictEqual(b.company.permitYear, "");
+  assert.strictEqual(b.company.factoryReg, "820200300125423");
+  assert.strictEqual(b.company.permitNo, "2569-12560");
+  assert.strictEqual(b.company.permitYear, 2569);
   const code = fs.readFileSync(path.join(ROOT, "apps-script", "Code.gs"), "utf8");
   for (const bad of ["แน็ป", "82260007625693", "2569-8409", "SEED_TYPES", "Nutri", "NAP"]) assert.ok(!code.includes(bad), "Code.gs must not contain " + bad);
 });
@@ -455,6 +456,101 @@ test("setupSystem is idempotent (no second spreadsheet, never seeds, keeps exist
   delete state.props.WASTE_VIEW_PASSWORD;
   assert.ok(/^ยังไม่ได้ตั้ง Script Property: WASTE_VIEW_PASSWORD \(ดูได้อย่างเดียว\) — /.test(ctx.setupSystem().passwordMessage));
   state.props.WASTE_VIEW_PASSWORD = VPW;
+});
+
+/* ---------- permit seed (สก.2 2569-12560: 40 lines, 8 receivers, 1,101.55 t) ---------- */
+function seedEnv(seedOnSetup) {
+  const g = createGas();
+  const c = loadCode(g.gas);
+  c.SEED_ON_SETUP = seedOnSetup;
+  const setup = c.setupSystem();
+  Object.assign(g.state.props, PROPS);
+  const ss = g.state.spreadsheets[g.state.props.WASTE_SPREADSHEET_ID];
+  const rows = n => ss.getSheetByName(n).getLastRow() - 1;
+  const raw = body => JSON.parse(c.doPost({ postData: { contents: JSON.stringify(Object.assign({ actor: ACTOR }, body)) } }).getContent());
+  const get = a => JSON.parse(c.doGet({ parameter: { action: a } }).getContent());
+  return { c, g, ss, setup, rows, raw, get, tok: () => okData(raw({ action: "login", password: RPW })).token };
+}
+const sumTons = list => Math.round(list.reduce((a, x) => a + x.permit_tons, 0) * 100) / 100;
+
+test("seedThepwatanaPermit on an existing EMPTY database: 40 types, 8 receivers, 1,101.55 t; quotas = sum of lines; dashboard / bootstrap work", () => {
+  const e = seedEnv(false);
+  assert.strictEqual(e.rows("waste_types"), 0);
+  const r = e.c.seedThepwatanaPermit();
+  assert.strictEqual(r.seeded, true);
+  assert.deepStrictEqual([r.types, r.receivers, r.permit_tons], [40, 8, 1101.55]);
+  assert.strictEqual(e.rows("waste_types"), 40);
+  assert.strictEqual(e.rows("receivers"), 8);
+  assert.strictEqual(e.rows("movements"), 0);
+  const b = okData(e.get("bootstrap"));
+  assert.strictEqual(b.types.length, 40);
+  assert.strictEqual(b.receivers.length, 8);
+  assert.strictEqual(sumTons(b.types), 1101.55);
+  assert.ok(b.types.every(t => t.active === 1 && /^fa-/.test(t.icon) && /^#[0-9A-F]{6}$/.test(t.color)));
+  assert.strictEqual(new Set(b.types.map(t => t.color)).size, 40, "distinct colours");
+  assert.strictEqual(b.company.permitNo, "2569-12560");
+  // each line is its own type: 150110 appears 4 times with different receiver / management code
+  const t150110 = b.types.filter(t => t.code === "150110");
+  assert.strictEqual(t150110.length, 4);
+  assert.ok(t150110.some(t => t.receiver === "บจก. อารยาค้าถัง" && t.mgmt_code === "039" && t.permit_tons === 400 && t.receiver_reg === "10740101225521"));
+  assert.ok(b.types.some(t => t.code === "1601001" && t.permit_tons === 50 && t.mgmt_code === "042"));
+  assert.ok(b.types.some(t => t.code === "160698" && t.permit_tons === 0.05));
+  const quota = {};
+  b.types.forEach(t => { quota[t.receiver] = Math.round(((quota[t.receiver] || 0) + t.permit_tons) * 100) / 100; });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(quota)), {
+    "บจก. อารยาค้าถัง": 400, "บมจ. เบตเตอร์ เวิลด์ กรีน": 287.05, "บมจ. อัคคีปราการ": 209, // sheet 3 of the workbook says 262.05 / 178 (56 t short)
+    "บมจ. บริหารและพัฒนาเพื่อการอนุรักษ์สิ่งแวดล้อม": 120, "บจก. มั่นคงยั่งยืน รีไซเคิล": 45, "บจก. กรีนเซฟรีไซเคิ้ล": 30,
+    "บจก. สุขเจริญทรัพย์ วังเย็น": 10, "บจก. ซี.อี.เอ คลีนโปรดักส์": 0.5
+  });
+  const d = okData(e.get("dashboard"));
+  assert.strictEqual(d.kpi.permit_kg, 1101550);
+  assert.strictEqual(d.receivers.length, 8);
+  d.receivers.forEach(x => assert.strictEqual(x.permit_kg, Math.round(quota[x.receiver] * 1000)));
+  assert.strictEqual(sumTons(b.receivers.map(x => ({ permit_tons: x.permit_tons }))), 1101.55);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(b.receivers.map(x => x.reg))), ["10740101225521", "10190000825494", "82020000125442", "72070000125407", "10110020125675", "10110102325581", "10240002925477", "10240004525614"]);
+  // movements work on a seeded type
+  const tok = e.tok();
+  const id = b.types[0].id;
+  assert.strictEqual(okData(e.raw({ action: "store", token: tok, type_id: id, weight_t: "0.5", container: "drum200", containers: 2, location: "A" })).balance_kg, 500);
+});
+
+test("seedThepwatanaPermit is idempotent: a second run refuses, nothing duplicated, movements untouched; also refuses when types already exist", () => {
+  const e = seedEnv(false);
+  e.c.seedThepwatanaPermit();
+  const tok = e.tok();
+  const id = okData(e.get("bootstrap")).types[0].id;
+  okData(e.raw({ action: "store", token: tok, type_id: id, weight_t: "1", container: "drum200", containers: 1, location: "A" }));
+  const r2 = e.c.seedThepwatanaPermit();
+  assert.strictEqual(r2.seeded, false);
+  assert.ok(/มีข้อมูลอยู่แล้ว 40 แถว/.test(r2.message), r2.message);
+  assert.deepStrictEqual([e.rows("waste_types"), e.rows("receivers"), e.rows("movements")], [40, 8, 1]);
+  const e2 = seedEnv(false);
+  okData(e2.raw({ action: "type_save", token: e2.tok(), code: "150101", name: "x", permit_tons: "1", mgmt_code: "011", receiver: "บจก. ทดสอบ", receiver_reg: "123", icon: "fa-box", color: "#112233", active: 1 }));
+  assert.strictEqual(e2.c.seedThepwatanaPermit().seeded, false);
+  assert.deepStrictEqual([e2.rows("waste_types"), e2.rows("receivers")], [1, 1]);
+});
+
+test("setupSystem seeds a NEW database (rebuilt install) but not an existing one; reset_data keeps the types / receivers", () => {
+  const e = seedEnv(true);
+  assert.strictEqual(e.setup.created, true);
+  assert.strictEqual(e.setup.seededTypes, 40);
+  assert.deepStrictEqual([e.rows("waste_types"), e.rows("receivers"), e.rows("movements")], [40, 8, 0]);
+  const again = e.c.setupSystem();
+  assert.strictEqual(again.created, false);
+  assert.strictEqual(again.seededTypes, 0);
+  assert.deepStrictEqual([e.rows("waste_types"), e.rows("receivers")], [40, 8]);
+  // an existing empty database with setupSystem is NOT seeded (use seedThepwatanaPermit)
+  const ex = seedEnv(false);
+  ex.c.SEED_ON_SETUP = true;
+  assert.strictEqual(ex.c.setupSystem().seededTypes, 0);
+  assert.strictEqual(ex.rows("waste_types"), 0);
+  const tok = e.tok();
+  const id = okData(e.get("bootstrap")).types[0].id;
+  okData(e.raw({ action: "store", token: tok, type_id: id, weight_t: "1", container: "drum200", containers: 1, location: "A" }));
+  okData(e.raw({ action: "reset_data", token: tok, resetPassword: RPW }));
+  assert.deepStrictEqual([e.rows("waste_types"), e.rows("receivers"), e.rows("movements")], [40, 8, 0]);
+  const code = fs.readFileSync(path.join(ROOT, "apps-script", "Code.gs"), "utf8");
+  for (const bad of ["แน็ป", "82260007625693", "2569-8409"]) assert.ok(!code.includes(bad));
 });
 
 /* ---------- transport ---------- */
@@ -1699,7 +1795,7 @@ test("names: the menu / page is “ข้อมูลภายใน”, the pub
   const src = readDoc("apps-script/Code.gs");
   const code = t => t.split(/\r?\n/).filter(l => !/^\s*(\*|\/\/|\/\*)/.test(l)).join("\n").replace(/\/\/[^\n"']*$/gm, "");
   // only data values may still contain the word (seed waste name, preset system names)
-  const strip = t => t.replace(/ตะกอนจากระบบบำบัดน้ำเสีย|ระบบบำบัดน้ำเสียภายในโรงงาน|บำบัดน้ำเสีย/g, "");
+  const strip = t => t.replace(/ตะกอนจากระบบบำบัดน้ำเสีย|ระบบบำบัดน้ำเสียภายในโรงงาน|ผ่านระบบบำบัดแล้ว|บำบัดน้ำเสีย/g, "");
   for (const [f, t] of [["index.html", html], ["Code.gs (code)", code(src)]]) {
     assert.ok(!/บำบัด/.test(strip(t)), f + ": " + (strip(t).match(/.{0,30}บำบัด.{0,30}/) || [""])[0]);
   }
